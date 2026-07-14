@@ -1,0 +1,43 @@
+name: Job Alert Checker
+
+on:
+  # Every 2 hours at :30 past. 02:30 UTC = 08:00 IST -> the daily heartbeat run.
+  schedule:
+    - cron: '30 */2 * * *'
+  workflow_dispatch:          # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write             # needed to commit seen.json back to the repo
+
+jobs:
+  check-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 playwright
+          playwright install --with-deps chromium
+
+      - name: Run job checker
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+        run: python checker.py
+
+      - name: Commit seen.json (dedup state)
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add seen.json
+          git diff --cached --quiet || git commit -m "update seen jobs [skip ci]"
+          git push
