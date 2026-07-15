@@ -114,10 +114,13 @@ HEADERS = {
 SEEN_FILE = "seen.json"
 MAX_JOBS_PER_COMPANY = 60
 
-# Daily heartbeat: 8:00 AM IST = 02:30 UTC. The GitHub Actions cron fires at
-# :30 past every even UTC hour, so hour==2 happens exactly once per day —
-# that run is the guaranteed "still alive" email even with 0 new matches.
-HEARTBEAT_HOUR_UTC = 2
+# Daily heartbeat: send one "still alive" email per day at/after 8:00 AM IST
+# (= 02:30 UTC). GitHub cron is imprecise (runs can drift 5-30+ min), so we do
+# NOT match an exact hour. Instead: the FIRST run on a given calendar day whose
+# time is >= the target hour fires the heartbeat; we record the date so it only
+# happens once per day. State is kept in a tiny file committed alongside seen.json.
+HEARTBEAT_HOUR_UTC = 2          # 02:xx UTC = 08:xx IST
+HEARTBEAT_STATE_FILE = "heartbeat.json"
 
 
 # ───────────────────────── filter logic ─────────────────────────
@@ -677,6 +680,20 @@ STRATEGIES = {
 
 # ───────────────────────── state & email ─────────────────────────
 
+def _heartbeat_already_sent_today(today_str):
+    if os.path.exists(HEARTBEAT_STATE_FILE):
+        try:
+            with open(HEARTBEAT_STATE_FILE) as f:
+                return json.load(f).get("last_date") == today_str
+        except Exception:
+            return False
+    return False
+
+def _record_heartbeat(today_str):
+    with open(HEARTBEAT_STATE_FILE, "w") as f:
+        json.dump({"last_date": today_str}, f)
+
+
 def load_seen():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE) as f:
@@ -728,8 +745,18 @@ def main():
     save_seen(seen)
 
     total_new = sum(len(v) for v in new_matches.values())
-    current_hour_utc = datetime.now(timezone.utc).hour
-    is_heartbeat_run = (current_hour_utc == HEARTBEAT_HOUR_UTC)
+    now_utc = datetime.now(timezone.utc)
+    today_str = now_utc.strftime("%Y-%m-%d")
+
+    # Heartbeat fires on the first run at/after the target hour each day, and
+    # only if it hasn't already fired today (survives GitHub cron drift).
+    is_heartbeat_run = (
+        now_utc.hour >= HEARTBEAT_HOUR_UTC
+        and not _heartbeat_already_sent_today(today_str)
+    )
+    if is_heartbeat_run:
+        _record_heartbeat(today_str)
+
     should_send = total_new > 0 or is_heartbeat_run
 
     print(f"\nTotal new: {total_new} | UTC hour: {current_hour_utc} | heartbeat run: {is_heartbeat_run} | will send: {should_send}")
