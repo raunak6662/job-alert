@@ -759,7 +759,7 @@ def main():
 
     should_send = total_new > 0 or is_heartbeat_run
 
-    print(f"\nTotal new: {total_new} | UTC hour: {current_hour_utc} | heartbeat run: {is_heartbeat_run} | will send: {should_send}")
+    print(f"\nTotal new: {total_new} | UTC hour: {now_utc.hour} | heartbeat run: {is_heartbeat_run} | will send: {should_send}")
 
     if not should_send:
         print("Not a heartbeat run and nothing new — staying silent, no email sent.")
