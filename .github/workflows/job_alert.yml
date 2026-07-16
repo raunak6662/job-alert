@@ -1,9 +1,10 @@
 name: Job Alert Checker
 
 on:
-  # Every 2 hours at :30 past. 02:30 UTC = 08:00 IST -> the daily heartbeat run.
+  # Every hour at :30 past. 02:30 UTC = 08:00 IST -> first run at/after that
+  # fires the once-daily heartbeat (see checker.py). Hourly = faster new-job alerts.
   schedule:
-    - cron: '30 */2 * * *'
+    - cron: '30 * * * *'
   workflow_dispatch:          # lets you trigger a run manually from the Actions tab
 
 permissions:
