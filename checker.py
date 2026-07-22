@@ -6,7 +6,7 @@ import os
 import re
 import json
 import html
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urljoin
 
 # ═══════════════════════════════════════════════════════════════
@@ -112,6 +112,10 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 SEEN_FILE = "seen.json"
+# Entries older than this are dropped from seen.json on each run, so the file
+# stays small. NOTE: a job still open after this many days will be re-alerted
+# once -- treat that as a useful "still open" nudge rather than a bug.
+SEEN_RETENTION_DAYS = 7
 MAX_JOBS_PER_COMPANY = 60
 
 # Daily heartbeat: send one "still alive" email per day at/after 8:00 AM IST
@@ -695,14 +699,51 @@ def _record_heartbeat(today_str):
 
 
 def load_seen():
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE) as f:
-            return set(json.load(f))
-    return set()
+    """Load seen job URLs, dropping anything older than SEEN_RETENTION_DAYS.
 
-def save_seen(seen):
+    Storage format is {url: "YYYY-MM-DD"} (the date first seen). The old format
+    was a plain list with no dates; those entries are migrated by stamping them
+    with today's date, so the first run after upgrading keeps everything and
+    pruning starts working from then on.
+    Returns (active_urls_set, url_to_date_dict).
+    """
+    if not os.path.exists(SEEN_FILE):
+        return set(), {}
+
+    try:
+        with open(SEEN_FILE) as f:
+            data = json.load(f)
+    except Exception:
+        return set(), {}
+
+    today = datetime.now(timezone.utc).date()
+
+    # Migrate old list-of-urls format
+    if isinstance(data, list):
+        stamped = {url: today.isoformat() for url in data}
+        print(f"  (migrated {len(stamped)} seen entries to timestamped format)")
+        return set(stamped), stamped
+
+    cutoff = today - timedelta(days=SEEN_RETENTION_DAYS)
+    kept, dropped = {}, 0
+    for url, date_str in data.items():
+        try:
+            seen_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except Exception:
+            seen_date = today          # unparseable -> treat as fresh
+        if seen_date >= cutoff:
+            kept[url] = date_str
+        else:
+            dropped += 1
+
+    if dropped:
+        print(f"  (pruned {dropped} seen entries older than {SEEN_RETENTION_DAYS} days)")
+    return set(kept), kept
+
+
+def save_seen(seen_dates):
     with open(SEEN_FILE, "w") as f:
-        json.dump(sorted(seen), f, indent=1)
+        json.dump(dict(sorted(seen_dates.items())), f, indent=1)
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -718,7 +759,8 @@ def send_email(subject, body):
 # ───────────────────────── main ─────────────────────────
 
 def main():
-    seen = load_seen()
+    seen, seen_dates = load_seen()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
     new_matches = {}
     broken_sources = []
 
@@ -738,11 +780,12 @@ def main():
                 new_matches[company] = fresh
                 for m in fresh:
                     seen.add(m["url"])
+                    seen_dates[m["url"]] = today_iso
         except Exception as e:
             print(f"  SOURCE BROKEN: {e}")
             broken_sources.append(f"{company}: {target['source_url']}\n    error: {e}")
 
-    save_seen(seen)
+    save_seen(seen_dates)
 
     total_new = sum(len(v) for v in new_matches.values())
     now_utc = datetime.now(timezone.utc)
