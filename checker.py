@@ -101,6 +101,12 @@ TARGETS = [
         "search_query": "software development engineer",
         "location_query": "Bengaluru, India",
     },
+    {
+            "company": "Glean",
+            "strategy": "greenhouse",
+            "board_token": "gleanwork",
+            "source_url": "https://job-boards.greenhouse.io/gleanwork",
+        },
 ]
 
 SENDER_EMAIL   = os.environ["GMAIL_ADDRESS"]
